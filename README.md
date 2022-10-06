@@ -1,0 +1,1 @@
+# typescriptify-laravel-models
