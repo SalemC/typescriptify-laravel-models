@@ -9,7 +9,7 @@ use Illuminate\Support\Str;
 use Exception;
 use stdClass;
 
-class TypeScriptInterfaceGenerator {
+class TypeScriptifyModel {
     /**
      * The fully qualified model name.
      *

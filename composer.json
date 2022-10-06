@@ -14,5 +14,12 @@
             "email": "salem.cresswell@btinternet.com"
         }
     ],
-    "require": {}
+    "require": {},
+    "extra": {
+        "laravel": {
+            "aliases": {
+                "TypeScriptifyModel": "SalemC\\TypeScriptifyLaravelModels\\TypeScriptifyModel"
+            }
+        }
+    }
 }
