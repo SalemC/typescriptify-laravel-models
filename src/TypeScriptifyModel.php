@@ -13,9 +13,9 @@ class TypeScriptifyModel {
     /**
      * The fully qualified model name.
      *
-     * @var string
+     * @var string|null
      */
-    private static string $fullyQualifiedModelName;
+    private static string|null $fullyQualifiedModelName = null;
 
     /**
      * The supported database connections.
@@ -43,6 +43,7 @@ class TypeScriptifyModel {
     private static function hasValidModel(): bool {
         $className = self::$fullyQualifiedModelName;
 
+        if (is_null($className)) return false;
         if (!class_exists($className)) return false;
         if (!is_subclass_of($className, Model::class)) return false;
 
@@ -69,7 +70,6 @@ class TypeScriptifyModel {
         $columnType = Str::of($columnSchema->Type);
 
         // @todo sets
-        // @todo enums
         $mappedType = match (true) {
             $columnType->startsWith('bit') => 'number',
             $columnType->startsWith('int') => 'number',
@@ -101,6 +101,7 @@ class TypeScriptifyModel {
             $columnType->startsWith('timestamp') => 'string',
             $columnType->startsWith('mediumtext') => 'string',
             $columnType->startsWith('mediumblob') => 'string',
+            $columnType->startsWith('enum') => $columnType->after('enum(')->before(')')->replace(',', '|'),
 
             default => 'unknown',
         };
