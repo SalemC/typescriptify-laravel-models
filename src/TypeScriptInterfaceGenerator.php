@@ -1,28 +1,21 @@
 <?php
 
-namespace App\Console\Commands;
+namespace SalemC\TypeScriptifyLaravelModels;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 
+use Exception;
 use stdClass;
 
-class GenerateTypeScriptInterfaceFromModel extends Command {
+class TypeScriptInterfaceGenerator {
     /**
-     * The name and signature of the console command.
+     * The fully qualified model name.
      *
      * @var string
      */
-    protected $signature = 'typescript:generate-interface-from-model {model}';
-
-    /**
-     * The console command description.
-     *
-     * @var string
-     */
-    protected $description = 'Generate a TypeScript interface from a model';
+    private static string $fullyQualifiedModelName;
 
     /**
      * The supported database connections.
@@ -38,7 +31,7 @@ class GenerateTypeScriptInterfaceFromModel extends Command {
      *
      * @return bool
      */
-    private function hasSupportedDatabaseConnection(): bool {
+    private static function hasSupportedDatabaseConnection(): bool {
         return collect(self::SUPPORTED_DATABASE_CONNECTIONS)->contains(DB::getDefaultConnection());
     }
 
@@ -47,8 +40,8 @@ class GenerateTypeScriptInterfaceFromModel extends Command {
      *
      * @return bool
      */
-    private function hasValidModel(): bool {
-        $className = $this->getFullyQualifiedModelName();
+    private static function hasValidModel(): bool {
+        $className = self::$fullyQualifiedModelName;
 
         if (!class_exists($className)) return false;
         if (!is_subclass_of($className, Model::class)) return false;
@@ -57,21 +50,12 @@ class GenerateTypeScriptInterfaceFromModel extends Command {
     }
 
     /**
-     * Get the fully qualified model name passed as an argument to this command.
-     *
-     * @return string
-     */
-    private function getFullyQualifiedModelName(): string {
-        return $this->argument('model');
-    }
-
-    /**
      * Get the table name for the supplied model.
      *
      * @return string
      */
-    private function getTableName(): string {
-        return (new ($this->getFullyQualifiedModelName()))->getTable();
+    private static function getTableName(): string {
+        return (new (self::$fullyQualifiedModelName))->getTable();
     }
 
     /**
@@ -81,7 +65,7 @@ class GenerateTypeScriptInterfaceFromModel extends Command {
      *
      * @return string
      */
-    private function getTypeScriptType(stdClass $columnSchema): string {
+    private static function getTypeScriptType(stdClass $columnSchema): string {
         $columnType = Str::of($columnSchema->Type);
 
         // @todo sets
@@ -129,41 +113,53 @@ class GenerateTypeScriptInterfaceFromModel extends Command {
     }
 
     /**
-     * Print the generated interface.
+     * Generate the interface.
      *
-     * @return void
+     * @return string
      */
-    private function printGeneratedInterface(): void {
-        $tableColumns = collect(DB::select(DB::raw('SHOW COLUMNS FROM ' . $this->getTableName())));
+    private static function generateInterface(): string {
+        $tableColumns = collect(DB::select(DB::raw('SHOW COLUMNS FROM ' . self::getTableName())));
 
-        $this->info('interface ' . (Str::of($this->getFullyQualifiedModelName())->afterLast('\\')) . ' {');
+        $str = 'interface ' . (Str::of(self::$fullyQualifiedModelName)->afterLast('\\')) . " {\n";
 
-        $tableColumns->each(fn ($column) => $this->info('    ' . $column->Field . ': ' . $this->getTypeScriptType($column) . ';'));
+        $tableColumns->each(function ($column) use (&$str) {
+            $str .= ('    ' . $column->Field . ': ' . self::getTypeScriptType($column) . ";\n");
+        });
 
-        $this->info('}');
+        $str .= "}\n";
+
+        return $str;
     }
 
     /**
-     * Execute the console command.
+     * Reset this class.
      *
-     * @return int
+     * @return void
      */
-    public function handle(): int {
-        if (!$this->hasValidModel()) {
-            $this->error('That\'s not a valid model!');
+    private static function reset(): void {
+        self::$fullyQualifiedModelName = null;
+    }
 
-            return Command::FAILURE;
+    /**
+     * Generate the TypeScript interface.
+     *
+     * @return string
+     */
+    public static function generate(string $fullyQualifiedModelName): string {
+        self::$fullyQualifiedModelName = $fullyQualifiedModelName;
+
+        if (!self::hasValidModel()) {
+            throw new Exception('That\'s not a valid model!');
         }
 
-        if (!$this->hasSupportedDatabaseConnection()) {
-            $this->error('Your database connection is currently unsupported!');
-            $this->info('The following database connections are supported: ' . collect(self::SUPPORTED_DATABASE_CONNECTIONS)->join(', '));
-
-            return Command::FAILURE;
+        if (!self::hasSupportedDatabaseConnection()) {
+            throw new Exception('Your database connection is currently unsupported! The following database connections are supported: ' . collect(self::SUPPORTED_DATABASE_CONNECTIONS)->join(', '));
         }
 
-        $this->printGeneratedInterface();
+        $interface = self::generateInterface();
 
-        return Command::SUCCESS;
+        self::reset();
+
+        return $interface;
     }
 }
