@@ -25,12 +25,21 @@ class GenerateTypeScriptInterfaceFromModel extends Command {
     protected $description = 'Generate a TypeScript interface from a model';
 
     /**
+     * The supported database connections.
+     *
+     * @var array
+     */
+    private const SUPPORTED_DATABASE_CONNECTIONS = [
+        'mysql',
+    ];
+
+    /**
      * Check if the current database connection type is supported.
      *
      * @return bool
      */
     private function hasSupportedDatabaseConnection(): bool {
-        return collect(['mysql'])->contains(DB::getDefaultConnection());
+        return collect(self::SUPPORTED_DATABASE_CONNECTIONS)->contains(DB::getDefaultConnection());
     }
 
     /**
@@ -147,7 +156,8 @@ class GenerateTypeScriptInterfaceFromModel extends Command {
         }
 
         if (!$this->hasSupportedDatabaseConnection()) {
-            $this->error('We currently only support a MySQL connection!');
+            $this->error('Your database connection is currently unsupported!');
+            $this->info('The following database connections are supported: ' . collect(self::SUPPORTED_DATABASE_CONNECTIONS)->join(', '));
 
             return Command::FAILURE;
         }
