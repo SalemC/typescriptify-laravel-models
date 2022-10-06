@@ -7,9 +7,9 @@ Effortlessly generate TypeScript interface definitions from Laravel models.
 ```php
 <?php
 
-use SalemC\TypeScriptifyLaravelModels\TypeScriptInterfaceGenerator;
+use SalemC\TypeScriptifyLaravelModels\TypeScriptifyModelGenerator;
 
-echo TypeScriptInterfaceGenerator::generate(\App\Models\User::class);
+echo TypeScriptifyModelGenerator::generate(\App\Models\User::class);
 ```
 Will produce:
 ```ts
