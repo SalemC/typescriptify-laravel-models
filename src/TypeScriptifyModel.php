@@ -2,10 +2,13 @@
 
 namespace SalemC\TypeScriptifyLaravelModels;
 
+use Illuminate\Database\Eloquent\Casts\AsStringable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Stringable;
 use Illuminate\Support\Str;
 
+use ReflectionMethod;
 use Exception;
 use stdClass;
 
@@ -16,6 +19,13 @@ class TypeScriptifyModel {
      * @var string|null
      */
     private static string|null $fullyQualifiedModelName = null;
+
+    /**
+     * The instantiated model.
+     *
+     * @var \Illuminate\Database\Eloquent\Model|null
+     */
+    private static Model|null $model = null;
 
     /**
      * The supported database connections.
@@ -56,24 +66,95 @@ class TypeScriptifyModel {
      * @return string
      */
     private static function getTableName(): string {
-        return (new (self::$fullyQualifiedModelName))->getTable();
+        return (self::$model)->getTable();
     }
 
     /**
-     * Get the mapped TypeScript type of a type.
+     * Check if the `$columnField` attribute exists in the protected $dates array.
      *
-     * @param stdClass $columnSchema
+     * @param string $columnField
+     *
+     * @return bool
+     */
+    private static function isAttributeCastedInDates(string $columnField): bool {
+        return in_array($columnField, (self::$model)->getDates(), false);
+    }
+
+    /**
+     * Check if the `$columnField` attribute has a native type cast.
+     *
+     * @param string $columnField
+     *
+     * @return bool
+     */
+    private static function isAttributeNativelyCasted(string $columnField): bool {
+        $model = self::$model;
+
+        // If $columnField exists in the $model->casts array.
+        if ($model->hasCast($columnField)) return true;
+
+        // If $columnField exists in the $model->dates array.
+        if (self::isAttributeCastedInDates($columnField)) return true;
+
+        return false;
+    }
+
+    /**
+     * Map a native casted attribute (casted via $casts/$dates) to a TypeScript type.
+     *
+     * @param string $columnField
      *
      * @return string
      */
-    private static function getTypeScriptType(stdClass $columnSchema): string {
-        $columnType = Str::of($columnSchema->Type);
+    private static function mapNativeCastToTypeScriptType(string $columnField): string {
+        // If the attribute is casted to a date via $model->dates, it won't exist in the underlying $model->casts array.
+        // That means if we called `getCastType` with it, it would throw an error because the key wouldn't exist.
+        // We know dates get serialized to strings, so we can avoid that by short circuiting here.
+        if (self::isAttributeCastedInDates($columnField)) return 'string';
 
-        // @todo sets
-        $mappedType = match (true) {
+        // The `getCastType` method is protected, therefore we need to use reflection to call it.
+        $getCastType = new ReflectionMethod(self::$model, 'getCastType');
+
+        $castType = Str::of($getCastType->invoke(self::$model, $columnField));
+
+        return match (true) {
+            $castType->is('int') => 'number',
+            $castType->is('real') => 'number',
+            $castType->is('date') => 'string',
+            $castType->is('float') => 'number',
+            $castType->is('bool') => 'boolean',
+            $castType->is('double') => 'number',
+            $castType->is('string') => 'string',
+            $castType->is('integer') => 'number',
+            $castType->is('datetime') => 'string',
+            $castType->is('boolean') => 'boolean',
+            $castType->is('array') => 'unknown[]',
+            $castType->is('encrypted') => 'string',
+            $castType->is('timestamp') => 'string',
+            $castType->is('immutable_date') => 'string',
+            $castType->is(AsStringable::class) => 'string',
+            $castType->is('immutable_datetime') => 'string',
+            $castType->is('object') => 'Record<string, unknown>',
+
+            $castType->startsWith('decimal') => 'number',
+
+            default => 'unknown',
+        };
+    }
+
+    /**
+     * Map a database column type to a TypeScript type.
+     *
+     * @param \Illuminate\Support\Stringable $columnType
+     *
+     * @return string
+     */
+    private static function mapDatabaseTypeToTypeScriptType(Stringable $columnType): string {
+        return match (true) {
             $columnType->startsWith('bit') => 'number',
             $columnType->startsWith('int') => 'number',
             $columnType->startsWith('dec') => 'number',
+            $columnType->startsWith('set') => 'string', // @todo generate the exact TypeScript type this can be.
             $columnType->startsWith('char') => 'string',
             $columnType->startsWith('text') => 'string',
             $columnType->startsWith('blob') => 'string',
@@ -105,7 +186,25 @@ class TypeScriptifyModel {
 
             default => 'unknown',
         };
+    }
 
+    /**
+     * Get the mapped TypeScript type of a type.
+     *
+     * @param stdClass $columnSchema
+     *
+     * @return string
+     */
+    private static function getTypeScriptType(stdClass $columnSchema): string {
+        $columnType = Str::of($columnSchema->Type);
+
+        if (self::isAttributeNativelyCasted($columnSchema->Field)) {
+            $mappedType = self::mapNativeCastToTypeScriptType($columnSchema->Field);
+        } else {
+            $mappedType = self::mapDatabaseTypeToTypeScriptType($columnType);
+        }
+
+        // We can't do much with an unknown type.
         if ($mappedType === 'unknown') return $mappedType;
 
         if ($columnSchema->Null === 'YES') $mappedType .= '|null';
@@ -133,21 +232,36 @@ class TypeScriptifyModel {
     }
 
     /**
+     * Initialize this class.
+     *
+     * @param string $fullyQualifiedModelName
+     *
+     * @return void
+     */
+    private static function initialize(string $fullyQualifiedModelName): void {
+        self::$fullyQualifiedModelName = $fullyQualifiedModelName;
+        self::$model = new (self::$fullyQualifiedModelName);
+    }
+
+    /**
      * Reset this class.
      *
      * @return void
      */
     private static function reset(): void {
         self::$fullyQualifiedModelName = null;
+        self::$model = null;
     }
 
     /**
      * Generate the TypeScript interface.
      *
+     * @param string $fullyQualifiedModelName
+     *
      * @return string
      */
     public static function generate(string $fullyQualifiedModelName): string {
-        self::$fullyQualifiedModelName = $fullyQualifiedModelName;
+        self::initialize($fullyQualifiedModelName);
 
         if (!self::hasValidModel()) {
             throw new Exception('That\'s not a valid model!');
