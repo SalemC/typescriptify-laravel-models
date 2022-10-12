@@ -12,21 +12,7 @@ use ReflectionMethod;
 use Exception;
 use stdClass;
 
-class TypeScriptifyModel {
-    /**
-     * The fully qualified model name.
-     *
-     * @var string|null
-     */
-    private static string|null $fullyQualifiedModelName = null;
-
-    /**
-     * The instantiated model.
-     *
-     * @var \Illuminate\Database\Eloquent\Model|null
-     */
-    private static Model|null $model = null;
-
+final class TypeScriptifyModel {
     /**
      * The supported database connections.
      *
@@ -37,11 +23,34 @@ class TypeScriptifyModel {
     ];
 
     /**
+     * The instantiated model.
+     *
+     * @var \Illuminate\Database\Eloquent\Model
+     */
+    private readonly Model $model;
+
+    /**
+     * Whether to include the model's $hidden properties.
+     *
+     * @var bool $includeHidden
+     */
+    private bool $includeHidden = false;
+
+    /**
+     * @param string $fullyQualifiedModelName The fully qualified model class name.
+     */
+    public function __construct(
+        private readonly string $fullyQualifiedModelName,
+    ) {
+        $this->model = new $fullyQualifiedModelName;
+    }
+
+    /**
      * Check if the current database connection type is supported.
      *
      * @return bool
      */
-    private static function hasSupportedDatabaseConnection(): bool {
+    private function hasSupportedDatabaseConnection(): bool {
         return collect(self::SUPPORTED_DATABASE_CONNECTIONS)->contains(DB::getDefaultConnection());
     }
 
@@ -50,53 +59,51 @@ class TypeScriptifyModel {
      *
      * @return bool
      */
-    private static function hasValidModel(): bool {
-        $className = self::$fullyQualifiedModelName;
-
-        if (is_null($className)) return false;
-        if (!class_exists($className)) return false;
-        if (!is_subclass_of($className, Model::class)) return false;
+    private function hasValidModel(): bool {
+        if (is_null($this->fullyQualifiedModelName)) return false;
+        if (!class_exists($this->fullyQualifiedModelName)) return false;
+        if (!is_subclass_of($this->fullyQualifiedModelName, Model::class)) return false;
 
         return true;
     }
 
     /**
-     * Get the table name for the supplied model.
+     * Check if the `$attribute` attribute exists in the protected $dates array.
      *
-     * @return string
-     */
-    private static function getTableName(): string {
-        return (self::$model)->getTable();
-    }
-
-    /**
-     * Check if the `$columnField` attribute exists in the protected $dates array.
-     *
-     * @param string $columnField
+     * @param string $attribute
      *
      * @return bool
      */
-    private static function isAttributeCastedInDates(string $columnField): bool {
-        return in_array($columnField, (self::$model)->getDates(), false);
+    private function isAttributeCastedInDates(string $attribute): bool {
+        return in_array($attribute, $this->model->getDates(), false);
     }
 
     /**
-     * Check if the `$columnField` attribute has a native type cast.
+     * Check if the `$attribute` attribute has a native type cast.
      *
-     * @param string $columnField
+     * @param string $attribute
      *
      * @return bool
      */
-    private static function isAttributeNativelyCasted(string $columnField): bool {
-        $model = self::$model;
-
+    private function isAttributeNativelyCasted(string $attribute): bool {
         // If $columnField exists in the $model->casts array.
-        if ($model->hasCast($columnField)) return true;
+        if ($this->model->hasCast($attribute)) return true;
 
         // If $columnField exists in the $model->dates array.
-        if (self::isAttributeCastedInDates($columnField)) return true;
+        if ($this->isAttributeCastedInDates($attribute)) return true;
 
         return false;
+    }
+
+    /**
+     * Is `$attribute` a hidden attribute?
+     *
+     * @param string $attribute
+     *
+     * @return bool
+     */
+    private function isAttributeHidden(string $attribute): bool {
+        return in_array($attribute, $this->model->getHidden());
     }
 
     /**
@@ -106,16 +113,16 @@ class TypeScriptifyModel {
      *
      * @return string
      */
-    private static function mapNativeCastToTypeScriptType(string $columnField): string {
+    private function mapNativeCastToTypeScriptType(string $columnField): string {
         // If the attribute is casted to a date via $model->dates, it won't exist in the underlying $model->casts array.
         // That means if we called `getCastType` with it, it would throw an error because the key wouldn't exist.
         // We know dates get serialized to strings, so we can avoid that by short circuiting here.
-        if (self::isAttributeCastedInDates($columnField)) return 'string';
+        if ($this->isAttributeCastedInDates($columnField)) return 'string';
 
         // The `getCastType` method is protected, therefore we need to use reflection to call it.
-        $getCastType = new ReflectionMethod(self::$model, 'getCastType');
+        $getCastType = new ReflectionMethod($this->model, 'getCastType');
 
-        $castType = Str::of($getCastType->invoke(self::$model, $columnField));
+        $castType = Str::of($getCastType->invoke($this->model, $columnField));
 
         return match (true) {
             $castType->is('int') => 'number',
@@ -149,7 +156,7 @@ class TypeScriptifyModel {
      *
      * @return string
      */
-    private static function mapDatabaseTypeToTypeScriptType(Stringable $columnType): string {
+    private function mapDatabaseTypeToTypeScriptType(Stringable $columnType): string {
         return match (true) {
             $columnType->startsWith('bit') => 'number',
             $columnType->startsWith('int') => 'number',
@@ -195,13 +202,13 @@ class TypeScriptifyModel {
      *
      * @return string
      */
-    private static function getTypeScriptType(stdClass $columnSchema): string {
+    private function getTypeScriptType(stdClass $columnSchema): string {
         $columnType = Str::of($columnSchema->Type);
 
-        if (self::isAttributeNativelyCasted($columnSchema->Field)) {
-            $mappedType = self::mapNativeCastToTypeScriptType($columnSchema->Field);
+        if ($this->isAttributeNativelyCasted($columnSchema->Field)) {
+            $mappedType = $this->mapNativeCastToTypeScriptType($columnSchema->Field);
         } else {
-            $mappedType = self::mapDatabaseTypeToTypeScriptType($columnType);
+            $mappedType = $this->mapDatabaseTypeToTypeScriptType($columnType);
         }
 
         // We can't do much with an unknown type.
@@ -217,13 +224,15 @@ class TypeScriptifyModel {
      *
      * @return string
      */
-    private static function generateInterface(): string {
-        $tableColumns = collect(DB::select(DB::raw('SHOW COLUMNS FROM ' . self::getTableName())));
+    private function generateInterface(): string {
+        $tableColumns = collect(DB::select(DB::raw('SHOW COLUMNS FROM ' . $this->model->getTable())));
 
-        $str = 'interface ' . (Str::of(self::$fullyQualifiedModelName)->afterLast('\\')) . " {\n";
+        $str = 'interface ' . (Str::of($this->fullyQualifiedModelName)->afterLast('\\')) . " {\n";
 
         $tableColumns->each(function ($column) use (&$str) {
-            $str .= ('    ' . $column->Field . ': ' . self::getTypeScriptType($column) . ";\n");
+            if (!$this->includeHidden && $this->isAttributeHidden($column->Field)) return;
+
+            $str .= ('    ' . $column->Field . ': ' . $this->getTypeScriptType($column) . ";\n");
         });
 
         $str .= "}\n";
@@ -232,49 +241,34 @@ class TypeScriptifyModel {
     }
 
     /**
-     * Initialize this class.
+     * Set whether we should include the model's protected $hidden attributes.
      *
-     * @param string $fullyQualifiedModelName
+     * @param bool $includeHidden
      *
-     * @return void
+     * @return self
      */
-    private static function initialize(string $fullyQualifiedModelName): void {
-        self::$fullyQualifiedModelName = $fullyQualifiedModelName;
-        self::$model = new (self::$fullyQualifiedModelName);
-    }
+    public function includeHidden(bool $includeHidden): self {
+        $this->includeHidden = $includeHidden;
 
-    /**
-     * Reset this class.
-     *
-     * @return void
-     */
-    private static function reset(): void {
-        self::$fullyQualifiedModelName = null;
-        self::$model = null;
+        return $this;
     }
 
     /**
      * Generate the TypeScript interface.
      *
-     * @param string $fullyQualifiedModelName
-     *
      * @return string
+     *
+     * @throws \Exception
      */
-    public static function generate(string $fullyQualifiedModelName): string {
-        self::initialize($fullyQualifiedModelName);
-
-        if (!self::hasValidModel()) {
+    public function generate(): string {
+        if (!$this->hasValidModel()) {
             throw new Exception('That\'s not a valid model!');
         }
 
-        if (!self::hasSupportedDatabaseConnection()) {
-            throw new Exception('Your database connection is currently unsupported! The following database connections are supported: ' . collect(self::SUPPORTED_DATABASE_CONNECTIONS)->join(', '));
+        if (!$this->hasSupportedDatabaseConnection()) {
+            throw new Exception('Your database connection is currently unsupported! The following database connections are supported: ' . implode(', ', self::SUPPORTED_DATABASE_CONNECTIONS));
         }
 
-        $interface = self::generateInterface();
-
-        self::reset();
-
-        return $interface;
+        return $this->generateInterface();
     }
 }
