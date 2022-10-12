@@ -48,7 +48,7 @@ echo (new TypeScriptifyModel(\App\Models\User::class))->generate();
 
 ### Database
 
-**TypeScriptifyModels** works primarily by gathering column data from the database your Laravel instance is setup with. Once gathered, it maps column types to known TypeScript types.
+**TypeScriptifyModels** works primarily by gathering column data from the database your Laravel instance is setup with. Once gathered, it maps column types to known TypeScript types. This means if you don't have a database column for a property you want converted, it won't exist in the final TypeScript interface definition.
 
 ### Casts
 
