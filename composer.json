@@ -17,6 +17,9 @@
     "require": {},
     "extra": {
         "laravel": {
+            "providers": [
+                "\\SalemC\\TypeScriptifyLaravelModels\\Providers\\TypeScriptifyModelsServiceProvider"
+            ],
             "aliases": {
                 "TypeScriptifyModel": "SalemC\\TypeScriptifyLaravelModels\\TypeScriptifyModel"
             }
