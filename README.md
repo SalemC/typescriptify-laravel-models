@@ -56,7 +56,7 @@ echo (new TypeScriptifyModel(\App\Models\User::class))->generate();
 
 ## Caveats
 
-**TypeScriptifyModels** is only able to map _predictable_ data types to TypeScript types. [Custom casts](https://laravel.com/docs/9.x/eloquent-mutators#custom-Casts) and [Custom Accessors](https://laravel.com/docs/9.x/eloquent-mutators#accessors-and-mutators) are not, and cannot be supported.
+**TypeScriptifyModels** is only able to map _predictable_ data types to TypeScript types. [Custom Casts](https://laravel.com/docs/9.x/eloquent-mutators#custom-Casts) and [Custom Accessors](https://laravel.com/docs/9.x/eloquent-mutators#accessors-and-mutators) are not, and cannot be supported.
 
 If **TypeScriptifyModels** fails to map a type to a TypeScript type, it will set the value to `unknown` in the TypeScript interface definition.
 
