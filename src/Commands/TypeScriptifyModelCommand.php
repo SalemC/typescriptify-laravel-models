@@ -12,7 +12,9 @@ class TypeScriptifyModelCommand extends Command {
      *
      * @var string
      */
-    protected $signature = 'typescriptify:model {model : The fully qualified class name for the model - e.g. App\Models\User}';
+    protected $signature = 'typescriptify:model
+                                                {model : The fully qualified class name for the model - e.g. App\Models\User}
+                                                {--includeHidden : Include the protected $hidden properties}';
 
     /**
      * The console command description.
@@ -27,7 +29,9 @@ class TypeScriptifyModelCommand extends Command {
      * @return int
      */
     public function handle() {
-        echo TypeScriptifyModel::generate($this->argument('model'));
+        echo (new TypeScriptifyModel($this->argument('model')))
+            ->includeHidden($this->option('includeHidden'))
+            ->generate();
 
         return Command::SUCCESS;
     }
