@@ -2,11 +2,17 @@
 
 namespace SalemC\TypeScriptifyLaravelModels;
 
+use SalemC\TypeScriptifyLaravelModels\Utilities\ModelCollector\ModelCollector;
+
 use Illuminate\Database\Eloquent\Casts\AsStringable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Stringable;
 use Illuminate\Support\Str;
+
+use Doctrine\DBAL\Schema\ForeignKeyConstraint;
 
 use ReflectionMethod;
 use Exception;
@@ -30,6 +36,13 @@ final class TypeScriptifyModel {
     private readonly Model $model;
 
     /**
+     * The target model's foreign key constraits.
+     *
+     * @var \Illuminate\Support\Collection
+     */
+    private readonly Collection $modelForeignKeyConstraints;
+
+    /**
      * Whether to include the model's $hidden properties.
      *
      * @var bool $includeHidden
@@ -43,6 +56,12 @@ final class TypeScriptifyModel {
         private readonly string $fullyQualifiedModelName,
     ) {
         $this->model = new $fullyQualifiedModelName;
+
+        $this->modelForeignKeyConstraints = collect(
+            Schema::getConnection()
+                ->getDoctrineSchemaManager()
+                ->listTableForeignKeys($this->model->getTable())
+        );
     }
 
     /**
@@ -109,20 +128,20 @@ final class TypeScriptifyModel {
     /**
      * Map a native casted attribute (casted via $casts/$dates) to a TypeScript type.
      *
-     * @param string $columnField
+     * @param string $attribute
      *
      * @return string
      */
-    private function mapNativeCastToTypeScriptType(string $columnField): string {
+    private function mapNativeCastToTypeScriptType(string $attribute): string {
         // If the attribute is casted to a date via $model->dates, it won't exist in the underlying $model->casts array.
         // That means if we called `getCastType` with it, it would throw an error because the key wouldn't exist.
         // We know dates get serialized to strings, so we can avoid that by short circuiting here.
-        if ($this->isAttributeCastedInDates($columnField)) return 'string';
+        if ($this->isAttributeCastedInDates($attribute)) return 'string';
 
         // The `getCastType` method is protected, therefore we need to use reflection to call it.
         $getCastType = new ReflectionMethod($this->model, 'getCastType');
 
-        $castType = Str::of($getCastType->invoke($this->model, $columnField));
+        $castType = Str::of($getCastType->invoke($this->model, $attribute));
 
         return match (true) {
             $castType->is('int') => 'number',
@@ -161,7 +180,7 @@ final class TypeScriptifyModel {
             $columnType->startsWith('bit') => 'number',
             $columnType->startsWith('int') => 'number',
             $columnType->startsWith('dec') => 'number',
-            $columnType->startsWith('set') => 'string', // @todo generate the exact TypeScript type this can be.
+            $columnType->startsWith('set') => 'string',
             $columnType->startsWith('char') => 'string',
             $columnType->startsWith('text') => 'string',
             $columnType->startsWith('blob') => 'string',
@@ -196,6 +215,45 @@ final class TypeScriptifyModel {
     }
 
     /**
+     * Get a foreign key constraint for `$attribute`.
+     *
+     * @param string $attribute
+     *
+     * @return ?\Doctrine\DBAL\Schema\ForeignKeyConstraint
+     */
+    private function getForeignKeyConstraintForAttribute(string $attribute): ?ForeignKeyConstraint {
+        return $this
+            ->modelForeignKeyConstraints
+            ->first(fn ($foreignKeyConstraint) => in_array($attribute, $foreignKeyConstraint->getLocalColumns()));
+    }
+
+    /**
+     * Check if `$attribute` is a relation.
+     *
+     * @param string $attribute
+     *
+     * @return bool
+     */
+    private function isAttributeRelation(string $attribute): bool {
+        return !!$this->getForeignKeyConstraintForAttribute($attribute);
+    }
+
+    /**
+     * Convert a foreign key to it's fully qualified model name.
+     *
+     * @param string $attribute
+     *
+     * @return string
+     */
+    private function convertForeignKeyToFullyQualifiedModelName(string $attribute): string {
+        $foreignTableName = $this
+            ->getForeignKeyConstraintForAttribute($attribute)
+            ->getForeignTableName();
+
+        return ModelCollector::getModelsMappedByTable()[$foreignTableName];
+    }
+
+    /**
      * Get the mapped TypeScript type of a type.
      *
      * @param stdClass $columnSchema
@@ -204,6 +262,12 @@ final class TypeScriptifyModel {
      */
     private function getTypeScriptType(stdClass $columnSchema): string {
         $columnType = Str::of($columnSchema->Type);
+
+        if ($this->isAttributeRelation($columnSchema->Field)) {
+            $fullyQualifiedRelatedModelName = $this->convertForeignKeyToFullyQualifiedModelName($columnSchema->Field);
+
+            return (new self($fullyQualifiedRelatedModelName))->generate();
+        }
 
         if ($this->isAttributeNativelyCasted($columnSchema->Field)) {
             $mappedType = $this->mapNativeCastToTypeScriptType($columnSchema->Field);
@@ -220,6 +284,17 @@ final class TypeScriptifyModel {
     }
 
     /**
+     * Convert a foreign key to a 'predicted' relation name.
+     *
+     * @param string $attribute
+     *
+     * @return string
+     */
+    private function convertForeignKeyToPredictedRelationName(string $attribute): string {
+        return Str::of($attribute)->replaceLast('_id', '')->camel();
+    }
+
+    /**
      * Generate the interface.
      *
      * @return string
@@ -227,17 +302,40 @@ final class TypeScriptifyModel {
     private function generateInterface(): string {
         $tableColumns = collect(DB::select(DB::raw('SHOW COLUMNS FROM ' . $this->model->getTable())));
 
-        $str = 'interface ' . (Str::of($this->fullyQualifiedModelName)->afterLast('\\')) . " {\n";
+        $outputBuffer = collect();
 
-        $tableColumns->each(function ($column) use (&$str) {
+        $outputBuffer->push('interface ' . (Str::of($this->fullyQualifiedModelName)->afterLast('\\')) . " {");
+
+        $tableColumns->each(function ($column) use ($outputBuffer) {
             if (!$this->includeHidden && $this->isAttributeHidden($column->Field)) return;
 
-            $str .= ('    ' . $column->Field . ': ' . $this->getTypeScriptType($column) . ";\n");
+            if ($this->isAttributeRelation($column->Field)) {
+                // The foreign model name will be the name of the interface we'll be generating.
+                $foreignModelName = Str::of($this->convertForeignKeyToFullyQualifiedModelName($column->Field))->afterLast('\\');
+                $relationName = $this->convertForeignKeyToPredictedRelationName($column->Field);
+
+                $outputBuffer->push('    ' . $relationName . ': ' . $foreignModelName . ";");
+
+                // Add a space so related interfaces aren't directly after each other.
+                $outputBuffer->prepend('');
+
+                // Get the TypeScript type of this column. We know it's a relation,
+                // therefore we know the string we get back will be another interface.
+                // Once we've got the interface, we'll want to explode it, then prepend
+                // each piece of the interface to the output buffer.
+                // We reverse the exploded string because we prepend, otherwise we'd prepend backwards.
+                Str::of($this->getTypeScriptType($column))
+                    ->explode("\n")
+                    ->reverse()
+                    ->each(fn ($str) => $outputBuffer->prepend($str));
+            } else {
+                $outputBuffer->push('    ' . $column->Field . ': ' . $this->getTypeScriptType($column) . ";");
+            }
         });
 
-        $str .= "}\n";
+        $outputBuffer->push('}');
 
-        return $str;
+        return $outputBuffer->join("\n");
     }
 
     /**

@@ -14,7 +14,9 @@
             "email": "salem.cresswell@btinternet.com"
         }
     ],
-    "require": {},
+    "require": {
+        "doctrine/dbal": "^3.4"
+    },
     "extra": {
         "laravel": {
             "providers": [
