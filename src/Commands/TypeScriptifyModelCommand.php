@@ -2,9 +2,9 @@
 
 namespace SalemC\TypeScriptifyLaravelModels\Commands;
 
-use Illuminate\Console\Command;
-
 use SalemC\TypeScriptifyLaravelModels\TypeScriptifyModel;
+
+use Illuminate\Console\Command;
 
 class TypeScriptifyModelCommand extends Command {
     /**
