@@ -224,7 +224,12 @@ final class TypeScriptifyModel {
     private function getForeignKeyConstraintForAttribute(string $attribute): ?ForeignKeyConstraint {
         return $this
             ->modelForeignKeyConstraints
-            ->first(fn ($foreignKeyConstraint) => in_array($attribute, $foreignKeyConstraint->getLocalColumns()));
+            ->first(function ($foreignKeyConstraint) use ($attribute) {
+                // Doctrine combines foreign key constraints that point to the same table.
+                // That means we have to check if the target column exists in the current
+                // foreign key constraint's 'local columns' array.
+                return in_array($attribute, $foreignKeyConstraint->getLocalColumns());
+            });
     }
 
     /**
@@ -266,14 +271,18 @@ final class TypeScriptifyModel {
         if ($this->isAttributeRelation($columnSchema->Field)) {
             $fullyQualifiedRelatedModelName = $this->convertForeignKeyToFullyQualifiedModelName($columnSchema->Field);
 
+            // We generate new interfaces for any relational attributes.
+            // That means we can recursively instantiate the current class to generate
+            // as many interface definitions for relational attributes as we need.
             return (new self($fullyQualifiedRelatedModelName))->generate();
         }
 
-        if ($this->isAttributeNativelyCasted($columnSchema->Field)) {
-            $mappedType = $this->mapNativeCastToTypeScriptType($columnSchema->Field);
-        } else {
-            $mappedType = $this->mapDatabaseTypeToTypeScriptType($columnType);
-        }
+        // If the attribute is natively casted, we'll want to perform native cast checking
+        // to generate the correct TypeScript type. If it's not natively casted, we can
+        // simply map the database type to a TypeScript type.
+        $mappedType = $this->isAttributeNativelyCasted($columnSchema->Field)
+            ? $this->mapNativeCastToTypeScriptType($columnSchema->Field)
+            : $this->mapDatabaseTypeToTypeScriptType($columnType);
 
         // We can't do much with an unknown type.
         if ($mappedType === 'unknown') return $mappedType;
@@ -302,21 +311,23 @@ final class TypeScriptifyModel {
     private function generateInterface(): string {
         $tableColumns = collect(DB::select(DB::raw('SHOW COLUMNS FROM ' . $this->model->getTable())));
 
-        $outputBuffer = collect();
-
-        $outputBuffer->push('interface ' . (Str::of($this->fullyQualifiedModelName)->afterLast('\\')) . " {");
+        $outputBuffer = collect([
+            // The output buffer always needs to start with the first `interface X {` line.
+            'interface ' . (Str::of($this->fullyQualifiedModelName)->afterLast('\\')) . " {"
+        ]);
 
         $tableColumns->each(function ($column) use ($outputBuffer) {
+            // If this attribute is hidden and we're not including hidden, we'll skip it.
             if (!$this->includeHidden && $this->isAttributeHidden($column->Field)) return;
 
             if ($this->isAttributeRelation($column->Field)) {
-                // The foreign model name will be the name of the interface we'll be generating.
+                // The foreign model name will be the name of the interface we'll generate for this relation.
                 $foreignModelName = Str::of($this->convertForeignKeyToFullyQualifiedModelName($column->Field))->afterLast('\\');
                 $relationName = $this->convertForeignKeyToPredictedRelationName($column->Field);
 
-                $outputBuffer->push('    ' . $relationName . ': ' . $foreignModelName . ";");
+                $outputBuffer->push(sprintf('    %s: %s;', $relationName, $foreignModelName));
 
-                // Add a space so related interfaces aren't directly after each other.
+                // Add an empty line so related interfaces aren't directly after each other.
                 $outputBuffer->prepend('');
 
                 // Get the TypeScript type of this column. We know it's a relation,
@@ -329,7 +340,7 @@ final class TypeScriptifyModel {
                     ->reverse()
                     ->each(fn ($str) => $outputBuffer->prepend($str));
             } else {
-                $outputBuffer->push('    ' . $column->Field . ': ' . $this->getTypeScriptType($column) . ";");
+                $outputBuffer->push(sprintf('    %s: %s;', $column->Field, $this->getTypeScriptType($column)));
             }
         });
 
