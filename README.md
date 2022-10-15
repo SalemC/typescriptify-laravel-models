@@ -16,10 +16,11 @@ Usage:
   typescriptify:model [options] [--] <model>
 
 Arguments:
-  model                 The fully qualified class name for the model - e.g. App\Models\User
+  model The fully qualified class name for the model - e.g. App\Models\User
 
 Options:
-      --includeHidden   Include the protected $hidden properties
+      --includeHidden[=INCLUDEHIDDEN] Include the protected $hidden properties [default: "false"]
+      --includeRelations[=INCLUDERELATIONS] Map foreign key columns to interface definitions [default: "true"]
 ```
 
 ## Example Usage
