@@ -21,7 +21,7 @@ final class TypeScriptifyModel {
     /**
      * The supported database connections.
      *
-     * @var array
+     * @var array<string>
      */
     private const SUPPORTED_DATABASE_CONNECTIONS = [
         'mysql',
@@ -37,7 +37,7 @@ final class TypeScriptifyModel {
     /**
      * The target model's foreign key constraits.
      *
-     * @var \Illuminate\Support\Collection
+     * @var \Illuminate\Support\Collection<\Doctrine\DBAL\Schema\ForeignKeyConstraint>
      */
     private readonly Collection $modelForeignKeyConstraints;
 
