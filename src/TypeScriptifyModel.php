@@ -51,7 +51,7 @@ final class TypeScriptifyModel {
 
     /**
      * @param string $fullyQualifiedModelName The fully qualified model class name.
-     * @param ?array<string,string> $convertedModelsMap The map of `fully qualified model name => interface name` definitions this class can refer to instead of generating its own definitions.
+     * @param ?array<string,string> $convertedModelsMap The map of `fully qualified model name => interface name` definitions this class can use instead of generating its own definitions.
      */
     public function __construct(
         private string $fullyQualifiedModelName,
