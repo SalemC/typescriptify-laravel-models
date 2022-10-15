@@ -326,7 +326,8 @@ final class TypeScriptifyModel {
 
                 $generatedTypeName = $generatedTypeScriptType
                     ->after('interface ')
-                    ->before(' {') . $generatedTypeScriptType->afterLast('}');
+                    ->before(' {')
+                    ->append($generatedTypeScriptType->afterLast('}'));
 
                 $outputBuffer->push(sprintf('    %s: %s;', $relationName, $generatedTypeName));
 
