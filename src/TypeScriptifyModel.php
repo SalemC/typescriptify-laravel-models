@@ -185,11 +185,13 @@ final class TypeScriptifyModel {
     /**
      * Map a database column type to a TypeScript type.
      *
-     * @param \Illuminate\Support\Stringable $columnType
+     * @param string $columnType
      *
      * @return string
      */
-    private function mapDatabaseTypeToTypeScriptType(Stringable $columnType): string {
+    private function mapDatabaseTypeToTypeScriptType(string $columnType): string {
+        $columnType = Str::of($columnType);
+
         return match (true) {
             $columnType->startsWith('bit') => 'number',
             $columnType->startsWith('int') => 'number',
@@ -280,8 +282,6 @@ final class TypeScriptifyModel {
      * @return string
      */
     private function getTypeScriptType(stdClass $columnSchema): string {
-        $columnType = Str::of($columnSchema->Type);
-
         if ($this->isAttributeRelation($columnSchema->Field)) {
             $fullyQualifiedRelatedModelName = $this->convertForeignKeyToFullyQualifiedModelName($columnSchema->Field);
 
@@ -294,6 +294,8 @@ final class TypeScriptifyModel {
                 // We generate new interfaces for any relational attributes.
                 // That means we can recursively instantiate the current class to generate
                 // as many interface definitions for relational attributes as we need.
+                // We pass our existing convertedModelsMap instance here to prevent this class
+                // mapping models we've already mapped in this current class instance.
                 $mappedType = (new self($fullyQualifiedRelatedModelName, $this->convertedModelsMap))->generate();
             }
         } else {
@@ -302,7 +304,7 @@ final class TypeScriptifyModel {
             // simply map the database type to a TypeScript type.
             $mappedType = $this->isAttributeNativelyCasted($columnSchema->Field)
                 ? $this->mapNativeCastToTypeScriptType($columnSchema->Field)
-                : $this->mapDatabaseTypeToTypeScriptType($columnType);
+                : $this->mapDatabaseTypeToTypeScriptType($columnSchema->Type);
         }
 
         // We can't do much with an unknown type.
@@ -347,7 +349,11 @@ final class TypeScriptifyModel {
     public function generate(): string {
         $tableColumns = collect(DB::select(DB::raw('SHOW COLUMNS FROM ' . $this->model->getTable())));
 
-        $interfaceName = Str::of($this->fullyQualifiedModelName)->afterLast('\\')->toString();
+        $interfaceName = Str::afterLast($this->fullyQualifiedModelName, '\\');
+
+        // At this point, we haven't technically generated the full TypeScript interface definition
+        // for the target model. However, if the current model was to reference itself (which is valid),
+        // without doing this here, it would cause an infinite loop.
         $this->convertedModelsMap[$this->fullyQualifiedModelName] = $interfaceName;
 
         // The output buffer always needs to start with the first `interface X {` line.
@@ -361,24 +367,38 @@ final class TypeScriptifyModel {
                 $relationName = $this->convertForeignKeyToPredictedRelationName($columnSchema->Field);
                 $generatedTypeScriptType = Str::of($this->getTypeScriptType($columnSchema));
 
-                $isRelationNewInterfaceDefinition = $generatedTypeScriptType->startsWith('interface ');
+                // We know we've just generated a new interface if the generated TypeScript type
+                // starts with 'interface '. If it doesn't, we'll be referring to a TypeScript type
+                // that's been previously generated.
+                $isRelationInterfaceDefinition = $generatedTypeScriptType->startsWith('interface ');
 
-                if ($isRelationNewInterfaceDefinition) {
+                if ($isRelationInterfaceDefinition) {
+                    // interface User { => User
                     $generatedInterfaceName = $generatedTypeScriptType
                         ->after('interface ')
                         ->before(' {');
 
                     $fullyQualifiedRelatedModelName = $this->convertForeignKeyToFullyQualifiedModelName($columnSchema->Field);
+                    // We've just generated a new interface, we'll want to make sure our class doesn't attempt to
+                    // generate it again by adding it to our convertedModelsMap.
                     $this->convertedModelsMap[$fullyQualifiedRelatedModelName] = $generatedInterfaceName->toString();
 
+                    // Columns aren't always required. To make sure we're not losing other type metadata,
+                    // we'll append everything after the end of the interface definition onto the new
+                    // interface name we've generated.
                     $generatedType = $generatedInterfaceName->append($generatedTypeScriptType->afterLast('}'));
                 } else {
+                    // If we don't have a new relation interface definition, we'll have the interface name definition,
+                    // retrieved from the convertedModelsMap (as well as any type metadata). We can use that value directly.
                     $generatedType = $generatedTypeScriptType;
                 }
 
+                // Append the relation to the interface we're generating.
                 $outputBuffer->push(sprintf('    %s: %s;', $relationName, $generatedType));
 
-                if ($isRelationNewInterfaceDefinition) {
+                // If we've generated a new interface, we'll want to append it above the current
+                // interface we're in the process of generating.
+                if ($isRelationInterfaceDefinition) {
                     // Add an empty line so related interfaces aren't directly after each other.
                     $outputBuffer->prepend('');
 
@@ -395,6 +415,7 @@ final class TypeScriptifyModel {
                         ->each(fn ($str) => $outputBuffer->prepend($str));
                 }
             } else {
+                // Append the column name, and the TypeScript type to the interface we're generating.
                 $outputBuffer->push(sprintf('    %s: %s;', $columnSchema->Field, $this->getTypeScriptType($columnSchema)));
             }
         });
