@@ -45,9 +45,16 @@ final class TypeScriptifyModel {
     /**
      * Whether to include the model's $hidden properties.
      *
-     * @var bool $includeHidden
+     * @var bool
      */
     private bool $includeHidden = false;
+
+    /**
+     * Whether to map the model's foreign keys to interfaces.
+     *
+     * @var bool
+     */
+    private bool $includeRelations = true;
 
     /**
      * @param string $fullyQualifiedModelName The fully qualified model class name.
@@ -282,7 +289,7 @@ final class TypeScriptifyModel {
      * @return string
      */
     private function getTypeScriptType(stdClass $columnSchema): string {
-        if ($this->isAttributeRelation($columnSchema->Field)) {
+        if ($this->includeRelations && $this->isAttributeRelation($columnSchema->Field)) {
             $fullyQualifiedRelatedModelName = $this->convertForeignKeyToFullyQualifiedModelName($columnSchema->Field);
 
             if (array_key_exists($fullyQualifiedRelatedModelName, $this->convertedModelsMap)) {
@@ -296,7 +303,10 @@ final class TypeScriptifyModel {
                 // as many interface definitions for relational attributes as we need.
                 // We pass our existing convertedModelsMap instance here to prevent this class
                 // mapping models we've already mapped in this current class instance.
-                $mappedType = (new self($fullyQualifiedRelatedModelName, $this->convertedModelsMap))->generate();
+                $mappedType = (new self($fullyQualifiedRelatedModelName, $this->convertedModelsMap))
+                    ->includeHidden($this->includeHidden)
+                    ->includeRelations($this->includeRelations)
+                    ->generate();
             }
         } else {
             // If the attribute is natively casted, we'll want to perform native cast checking
@@ -340,6 +350,19 @@ final class TypeScriptifyModel {
     }
 
     /**
+     * Set whether we should map the model's foreign keys to interfaces.
+     *
+     * @param bool $includeRelations
+     *
+     * @return self
+     */
+    public function includeRelations(bool $includeRelations): self {
+        $this->includeRelations = $includeRelations;
+
+        return $this;
+    }
+
+    /**
      * Generate the TypeScript interface.
      *
      * @return string
@@ -363,7 +386,7 @@ final class TypeScriptifyModel {
             // If this attribute is hidden and we're not including hidden, we'll skip it.
             if (!$this->includeHidden && $this->isAttributeHidden($columnSchema->Field)) return;
 
-            if ($this->isAttributeRelation($columnSchema->Field)) {
+            if ($this->includeRelations && $this->isAttributeRelation($columnSchema->Field)) {
                 $relationName = $this->convertForeignKeyToPredictedRelationName($columnSchema->Field);
                 $generatedTypeScriptType = Str::of($this->getTypeScriptType($columnSchema));
 
@@ -373,7 +396,7 @@ final class TypeScriptifyModel {
                 $isRelationInterfaceDefinition = $generatedTypeScriptType->startsWith('interface ');
 
                 if ($isRelationInterfaceDefinition) {
-                    // interface User { => User
+                    // `interface User {` => `User`
                     $generatedInterfaceName = $generatedTypeScriptType
                         ->after('interface ')
                         ->before(' {');
