@@ -24,6 +24,7 @@ Options:
 ```
 
 ## Example Usage
+
 Invocating `php artisan typescriptify:model \App\Models\User` on a fresh Laravel installation will produce:
 
 ```ts
@@ -43,6 +44,48 @@ Or if you prefer, you can instantiate your own version of the `TypeScriptifyMode
 use SalemC\TypeScriptifyLaravelModels\TypeScriptifyModel;
 
 echo (new TypeScriptifyModel(\App\Models\User::class))->generate();
+```
+
+## Relation Mapping
+
+**TypeScriptify Laravel Models** supports `belongsTo` relation mapping.
+
+Imagine you have the following scenario:
+
+```php
+// app/Models/User.php
+// columns: id, name, email, password, role_id
+
+public function role(): BelongsTo {
+    return $this->belongsTo(Role::class);
+}
+
+// app/Models/Role.php
+// columns: id, name
+
+public function roles(): HasMany {
+    return $this->hasMany(User::class);
+}
+```
+
+With a foreign key (**and a foreign key constraint**) `role_id` on the `users` table.
+
+It would be nice if instead of having a `role_id: number` attribute on the generated `User` interface, it was instead the full relational dataset, right? Well, **TypeScriptify Laravel Models** is able to recognise that the `role_id` column should be the `Role` model, and will map it to a reusable interface definition for you. Unfortunately, we're not able to determine the exact relation name; instead we attempt to guess it for you, based on the foreign key name:
+
+```ts
+// Automatically generated Role interface.
+interface Role {
+    id: number;
+    name: string;
+}
+
+interface User {
+    id: number;
+    name: string;
+    email: string;
+    password: string;
+    role: Role; // 'guessed' attribute name of 'role' (from 'role_id') with the interface Role, generated above.
+}
 ```
 
 ## How It Works
