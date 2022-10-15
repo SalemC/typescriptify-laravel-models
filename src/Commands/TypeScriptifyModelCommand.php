@@ -14,7 +14,7 @@ class TypeScriptifyModelCommand extends Command {
      */
     protected $signature = 'typescriptify:model
                                                 {model : The fully qualified class name for the model - e.g. App\Models\User}
-                                                {--includeHidden : Include the protected $hidden properties}
+                                                {--includeHidden=false : Include the protected $hidden properties}
                                                 {--includeRelations=true : Map foreign key columns to interface definitions}';
 
     /**

@@ -54,7 +54,7 @@ final class TypeScriptifyModel {
      *
      * @var bool
      */
-    private bool $includeRelations = true;
+    private bool $includeRelations = false;
 
     /**
      * @param string $fullyQualifiedModelName The fully qualified model class name.
