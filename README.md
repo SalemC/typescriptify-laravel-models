@@ -48,15 +48,15 @@ echo (new TypeScriptifyModel(\App\Models\User::class))->generate();
 
 ### Database
 
-**TypeScriptifyModels** works primarily by gathering column data from the database your Laravel instance is setup with. Once gathered, it maps column types to known TypeScript types. This means if you don't have a database column for a property you want converted, it won't exist in the final TypeScript interface definition.
+**TypeScriptify Laravel Models** works primarily by gathering column data from the database your Laravel instance is setup with. Once gathered, it maps column types to known TypeScript types. This means if you don't have a database column for a property you want converted, it won't exist in the final TypeScript interface definition.
 
 ### Casts
 
-**TypeScriptifyModels** also respects _predictable_ Laravel casts (specifically `protected $casts` and `protected $dates`) you've setup in the model being converted. It will map all known casts to TypeScript types.
+**TypeScriptify Laravel Models** also respects _predictable_ Laravel casts (specifically `protected $casts` and `protected $dates`) you've setup in the model being converted. It will map all known casts to TypeScript types.
 
 ## Caveats
 
-**TypeScriptifyModels** is only able to map _predictable_ data types to TypeScript types. [Custom Casts](https://laravel.com/docs/9.x/eloquent-mutators#custom-Casts) and [Custom Accessors](https://laravel.com/docs/9.x/eloquent-mutators#accessors-and-mutators) are not, and cannot be supported.
+**TypeScriptify Laravel Models** is only able to map _predictable_ data types to TypeScript types. [Custom Casts](https://laravel.com/docs/9.x/eloquent-mutators#custom-Casts) and [Custom Accessors](https://laravel.com/docs/9.x/eloquent-mutators#accessors-and-mutators) are not, and cannot be supported.
 
-If **TypeScriptifyModels** fails to map a type to a TypeScript type, it will set the value to `unknown` in the TypeScript interface definition.
+If **TypeScriptify Laravel Models** fails to map a type to a TypeScript type, it will set the value to `unknown` in the TypeScript interface definition.
 
