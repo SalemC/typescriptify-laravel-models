@@ -51,10 +51,24 @@ final class TypeScriptifyModel {
 
     /**
      * @param string $fullyQualifiedModelName The fully qualified model class name.
+     * @param ?array<string,string> $convertedModelsMap The map of `fully qualified model name => interface name` definitions this class can refer to instead of generating its own definitions.
      */
     public function __construct(
-        private readonly string $fullyQualifiedModelName,
+        private string $fullyQualifiedModelName,
+        private ?array &$convertedModelsMap = []
     ) {
+        // For consistency in comparisons that happen throughout the lifecycle of this class,
+        // we need all fully qualified model names to have a leading \.
+        $this->fullyQualifiedModelName = Str::of($fullyQualifiedModelName)->start('\\')->toString();
+
+        if (!$this->hasValidModel()) {
+            throw new Exception('That\'s not a valid model!');
+        }
+
+        if (!$this->hasSupportedDatabaseConnection()) {
+            throw new Exception('Your database connection is currently unsupported! The following database connections are supported: ' . implode(', ', self::SUPPORTED_DATABASE_CONNECTIONS));
+        }
+
         $this->model = new $fullyQualifiedModelName;
 
         $this->modelForeignKeyConstraints = collect(
@@ -271,10 +285,17 @@ final class TypeScriptifyModel {
         if ($this->isAttributeRelation($columnSchema->Field)) {
             $fullyQualifiedRelatedModelName = $this->convertForeignKeyToFullyQualifiedModelName($columnSchema->Field);
 
-            // We generate new interfaces for any relational attributes.
-            // That means we can recursively instantiate the current class to generate
-            // as many interface definitions for relational attributes as we need.
-            $mappedType = (new self($fullyQualifiedRelatedModelName))->generate();
+            if (array_key_exists($fullyQualifiedRelatedModelName, $this->convertedModelsMap)) {
+                // If we've already mapped this model to a TypeScript interface definition,
+                // we don't want to scan it again, otherwise we could potentially cause
+                // an infinite mapping loop.
+                $mappedType = $this->convertedModelsMap[$fullyQualifiedRelatedModelName];
+            } else {
+                // We generate new interfaces for any relational attributes.
+                // That means we can recursively instantiate the current class to generate
+                // as many interface definitions for relational attributes as we need.
+                $mappedType = (new self($fullyQualifiedRelatedModelName, $this->convertedModelsMap))->generate();
+            }
         } else {
             // If the attribute is natively casted, we'll want to perform native cast checking
             // to generate the correct TypeScript type. If it's not natively casted, we can
@@ -304,56 +325,6 @@ final class TypeScriptifyModel {
     }
 
     /**
-     * Generate the interface.
-     *
-     * @return string
-     */
-    private function generateInterface(): string {
-        $tableColumns = collect(DB::select(DB::raw('SHOW COLUMNS FROM ' . $this->model->getTable())));
-
-        $outputBuffer = collect([
-            // The output buffer always needs to start with the first `interface X {` line.
-            sprintf('interface %s {', Str::of($this->fullyQualifiedModelName)->afterLast('\\')),
-        ]);
-
-        $tableColumns->each(function ($column) use ($outputBuffer) {
-            // If this attribute is hidden and we're not including hidden, we'll skip it.
-            if (!$this->includeHidden && $this->isAttributeHidden($column->Field)) return;
-
-            if ($this->isAttributeRelation($column->Field)) {
-                $relationName = $this->convertForeignKeyToPredictedRelationName($column->Field);
-                $generatedTypeScriptType = Str::of($this->getTypeScriptType($column));
-
-                $generatedTypeName = $generatedTypeScriptType
-                    ->after('interface ')
-                    ->before(' {')
-                    ->append($generatedTypeScriptType->afterLast('}'));
-
-                $outputBuffer->push(sprintf('    %s: %s;', $relationName, $generatedTypeName));
-
-                // Add an empty line so related interfaces aren't directly after each other.
-                $outputBuffer->prepend('');
-
-                // Get the TypeScript type of this column. We know it's a relation,
-                // therefore we know the string we get back will be another interface.
-                // Once we've got the interface, we'll want to explode it, then prepend
-                // each piece of the interface to the output buffer.
-                // We reverse the exploded string because we prepend, otherwise we'd prepend backwards.
-                $generatedTypeScriptType
-                    ->explode("\n")
-                    ->reverse()
-                    ->each(fn ($str) => $outputBuffer->prepend($str));
-            } else {
-                $outputBuffer->push(sprintf('    %s: %s;', $column->Field, $this->getTypeScriptType($column)));
-            }
-        });
-
-        $outputBuffer->push('}');
-
-        return $outputBuffer->join("\n");
-    }
-
-    /**
      * Set whether we should include the model's protected $hidden attributes.
      *
      * @param bool $includeHidden
@@ -374,14 +345,62 @@ final class TypeScriptifyModel {
      * @throws \Exception
      */
     public function generate(): string {
-        if (!$this->hasValidModel()) {
-            throw new Exception('That\'s not a valid model!');
-        }
+        $tableColumns = collect(DB::select(DB::raw('SHOW COLUMNS FROM ' . $this->model->getTable())));
 
-        if (!$this->hasSupportedDatabaseConnection()) {
-            throw new Exception('Your database connection is currently unsupported! The following database connections are supported: ' . implode(', ', self::SUPPORTED_DATABASE_CONNECTIONS));
-        }
+        $interfaceName = Str::of($this->fullyQualifiedModelName)->afterLast('\\')->toString();
+        $this->convertedModelsMap[$this->fullyQualifiedModelName] = $interfaceName;
 
-        return $this->generateInterface();
+        // The output buffer always needs to start with the first `interface X {` line.
+        $outputBuffer = collect([sprintf('interface %s {', $interfaceName)]);
+
+        $tableColumns->each(function ($columnSchema) use ($outputBuffer) {
+            // If this attribute is hidden and we're not including hidden, we'll skip it.
+            if (!$this->includeHidden && $this->isAttributeHidden($columnSchema->Field)) return;
+
+            if ($this->isAttributeRelation($columnSchema->Field)) {
+                $relationName = $this->convertForeignKeyToPredictedRelationName($columnSchema->Field);
+                $generatedTypeScriptType = Str::of($this->getTypeScriptType($columnSchema));
+
+                $isRelationNewInterfaceDefinition = $generatedTypeScriptType->startsWith('interface ');
+
+                if ($isRelationNewInterfaceDefinition) {
+                    $generatedInterfaceName = $generatedTypeScriptType
+                        ->after('interface ')
+                        ->before(' {');
+
+                    $fullyQualifiedRelatedModelName = $this->convertForeignKeyToFullyQualifiedModelName($columnSchema->Field);
+                    $this->convertedModelsMap[$fullyQualifiedRelatedModelName] = $generatedInterfaceName->toString();
+
+                    $generatedType = $generatedInterfaceName->append($generatedTypeScriptType->afterLast('}'));
+                } else {
+                    $generatedType = $generatedTypeScriptType;
+                }
+
+                $outputBuffer->push(sprintf('    %s: %s;', $relationName, $generatedType));
+
+                if ($isRelationNewInterfaceDefinition) {
+                    // Add an empty line so related interfaces aren't directly after each other.
+                    $outputBuffer->prepend('');
+
+                    // Get the TypeScript type of this column. We know it's a relation,
+                    // therefore we know the string we get back will be another interface.
+                    // Once we've got the interface, we'll want to explode it, then prepend
+                    // each piece of the interface to the output buffer.
+                    // We reverse the exploded string because we prepend, otherwise we'd prepend backwards.
+                    $generatedTypeScriptType
+                        ->beforeLast('}')
+                        ->append('}')
+                        ->explode("\n")
+                        ->reverse()
+                        ->each(fn ($str) => $outputBuffer->prepend($str));
+                }
+            } else {
+                $outputBuffer->push(sprintf('    %s: %s;', $columnSchema->Field, $this->getTypeScriptType($columnSchema)));
+            }
+        });
+
+        $outputBuffer->push('}');
+
+        return $outputBuffer->join("\n");
     }
 }
