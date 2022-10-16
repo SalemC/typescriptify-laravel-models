@@ -90,7 +90,7 @@ final class TypeScriptifyModel {
      * @return bool
      */
     private function hasSupportedDatabaseConnection(): bool {
-        return collect(self::SUPPORTED_DATABASE_CONNECTIONS)->contains(DB::getDefaultConnection());
+        return in_array(DB::getDefaultConnection(), self::SUPPORTED_DATABASE_CONNECTIONS);
     }
 
     /**
