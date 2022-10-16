@@ -21,7 +21,7 @@ final class TypeScriptifyModel {
     /**
      * The supported database connections.
      *
-     * @var array
+     * @var array<string>
      */
     private const SUPPORTED_DATABASE_CONNECTIONS = [
         'mysql',
