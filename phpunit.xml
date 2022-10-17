@@ -28,7 +28,8 @@
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
 
-        <env name="DB_DATABASE" value="test"/>
+        <env name="DB_DATABASE" value="typescriptify_laravel_models"/>
         <env name="DB_USERNAME" value="root"/>
+        <env name="DB_PASSWORD" value=""/>
     </php>
 </phpunit>
