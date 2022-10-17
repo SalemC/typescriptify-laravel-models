@@ -1,10 +1,10 @@
 <?php
 
-namespace SalemC\TypeScriptifyLaravelModels\Utilities\ModelCollector;
+namespace SalemC\TypeScriptifyLaravelModels\Utilities;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\File;
-use Illuminate\Container\Container;
+use Illuminate\Support\Str;
 
 use ReflectionClass;
 
@@ -14,32 +14,37 @@ final class ModelCollector {
      *
      * @var ?array
      */
-    private static ?array $modelsCache = null;
+    private ?array $modelsCache = null;
 
     /**
      * The cache for all models mapped by table.
      *
      * @var ?array
      */
-    private static ?array $modelsMappedByTableCache = null;
+    private ?array $modelsMappedByTableCache = null;
+
+    /**
+     * Construct this class.
+     *
+     * @param string $path The path to start scanning models at.
+     */
+    public function __construct(private readonly string $path) {
+        //
+    }
 
     /**
      * Get all existing models.
      *
      * @return array
      */
-    public static function getModels(): array {
-        return self::$modelsCache ??= collect(File::allFiles(app_path()))
+    public function getModels(): array {
+        return $this->modelsCache ??= collect(File::allFiles($this->path))
             ->map(function ($item) {
-                $path = $item->getRelativePathName();
-
-                $className = sprintf(
-                    '\%s%s',
-                    Container::getInstance()->getNamespace(),
-                    strtr(substr($path, 0, strrpos($path, '.')), '/', '\\')
-                );
-
-                return $className;
+                return Str::of($item->getContents())
+                    ->match('/namespace (.*);/')
+                    ->start('\\')
+                    ->finish('\\' . Str::of($item->getRelativePathName())->afterLast('\\')->beforeLast('.'))
+                    ->toString() ?? '\\';
             })->filter(function ($className) {
                 if (!class_exists($className)) return false;
 
@@ -54,8 +59,8 @@ final class ModelCollector {
      *
      * @return array
      */
-    public static function getModelsMappedByTable(): array {
-        return self::$modelsMappedByTableCache ??= collect(self::getModels())
+    public function getModelsMappedByTable(): array {
+        return $this->modelsMappedByTableCache ??= collect($this->getModels())
             ->mapWithKeys(fn ($className) => [(new $className)->getTable() => $className])
             ->all();
     }

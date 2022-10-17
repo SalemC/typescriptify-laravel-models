@@ -2,7 +2,9 @@
 
 namespace SalemC\TypeScriptifyLaravelModels;
 
-use SalemC\TypeScriptifyLaravelModels\Utilities\ModelCollector\ModelCollector;
+use SalemC\TypeScriptifyLaravelModels\Exceptions\UnsupportedDatabaseConnection;
+use SalemC\TypeScriptifyLaravelModels\Exceptions\InvalidModelException;
+use SalemC\TypeScriptifyLaravelModels\Utilities\ModelCollector;
 
 use Illuminate\Database\Eloquent\Casts\AsStringable;
 use Illuminate\Database\Eloquent\Model;
@@ -35,6 +37,13 @@ final class TypeScriptifyModel {
     private readonly Model $model;
 
     /**
+     * The model collector.
+     *
+     * @var \SalemC\TypeScriptifyLaravelModels\Utilities\ModelCollector
+     */
+    private readonly ModelCollector $modelCollector;
+
+    /**
      * The target model's foreign key constraits.
      *
      * @var \Illuminate\Support\Collection
@@ -58,24 +67,28 @@ final class TypeScriptifyModel {
     /**
      * @param string $fullyQualifiedModelName The fully qualified model class name.
      * @param ?array<string,string> $convertedModelsMap The map of `fully qualified model name => interface name` definitions this class can use instead of generating its own definitions.
+     * @param ?string $modelCollectorPath The path to be used for scanning for models.
      */
     public function __construct(
         private string $fullyQualifiedModelName,
-        private ?array &$convertedModelsMap = []
+        private ?array &$convertedModelsMap = [],
+        private ?string $modelCollectorPath = null,
     ) {
         // For consistency in comparisons that happen throughout the lifecycle of this class,
         // we need all fully qualified model names to have a leading \.
         $this->fullyQualifiedModelName = Str::of($fullyQualifiedModelName)->start('\\')->toString();
 
         if (!$this->hasValidModel()) {
-            throw new Exception('That\'s not a valid model!');
+            throw new InvalidModelException;
         }
 
         if (!$this->hasSupportedDatabaseConnection()) {
-            throw new Exception('Your database connection is currently unsupported! The following database connections are supported: ' . implode(', ', self::SUPPORTED_DATABASE_CONNECTIONS));
+            throw new UnsupportedDatabaseConnection(self::SUPPORTED_DATABASE_CONNECTIONS);
         }
 
-        $this->model = new $fullyQualifiedModelName;
+        $this->model = new ($this->fullyQualifiedModelName);
+
+        $this->modelCollector = new ModelCollector($this->modelCollectorPath ?? app_path());
 
         $this->modelForeignKeyConstraints = collect(
             Schema::getConnection()
@@ -214,11 +227,11 @@ final class TypeScriptifyModel {
             $columnType->startsWith('bigint') => 'number',
             $columnType->startsWith('double') => 'number',
             $columnType->startsWith('binary') => 'string',
-            $columnType->startsWith('bigint') => 'number',
             $columnType->startsWith('decimal') => 'number',
             $columnType->startsWith('integer') => 'number',
             $columnType->startsWith('varchar') => 'string',
             $columnType->startsWith('boolean') => 'boolean',
+            $columnType->startsWith('tinyint') => 'boolean',
             $columnType->startsWith('tinyblob') => 'string',
             $columnType->startsWith('tinytext') => 'string',
             $columnType->startsWith('longtext') => 'string',
@@ -277,7 +290,7 @@ final class TypeScriptifyModel {
             ->getForeignKeyConstraintForAttribute($attribute)
             ->getForeignTableName();
 
-        return ModelCollector::getModelsMappedByTable()[$foreignTableName];
+        return $this->modelCollector->getModelsMappedByTable()[$foreignTableName];
     }
 
     /**
@@ -302,7 +315,7 @@ final class TypeScriptifyModel {
                 // as many interface definitions for relational attributes as we need.
                 // We pass our existing convertedModelsMap instance here to prevent this class
                 // mapping models we've already mapped in this current class instance.
-                $mappedType = (new self($fullyQualifiedRelatedModelName, $this->convertedModelsMap))
+                $mappedType = (new self($fullyQualifiedRelatedModelName, $this->convertedModelsMap, $this->modelCollectorPath))
                     ->includeHidden($this->includeHidden)
                     ->includeRelations($this->includeRelations)
                     ->generate();
