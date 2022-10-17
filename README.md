@@ -63,7 +63,7 @@ public function role(): BelongsTo {
 // app/Models/Role.php
 // columns: id, name
 
-public function roles(): HasMany {
+public function users(): HasMany {
     return $this->hasMany(User::class);
 }
 ```
