@@ -3,8 +3,10 @@
 namespace SalemC\TypeScriptifyLaravelModels;
 
 use SalemC\TypeScriptifyLaravelModels\Exceptions\UnsupportedDatabaseConnection;
+use SalemC\TypeScriptifyLaravelModels\Exceptions\InvalidCaseStyleException;
 use SalemC\TypeScriptifyLaravelModels\Exceptions\InvalidModelException;
 use SalemC\TypeScriptifyLaravelModels\Utilities\ModelCollector;
+use SalemC\TypeScriptifyLaravelModels\Classes\CaseStyle;
 
 use Illuminate\Database\Eloquent\Casts\AsStringable;
 use Illuminate\Database\Eloquent\Model;
@@ -51,6 +53,13 @@ final class TypeScriptifyModel {
     private readonly Collection $modelForeignKeyConstraints;
 
     /**
+     * The selected case style.
+     *
+     * @var string
+     */
+    private string $caseStyle = CaseStyle::DEFAULT;
+
+    /**
      * Whether to include the model's $hidden properties.
      *
      * @var bool
@@ -68,6 +77,9 @@ final class TypeScriptifyModel {
      * @param string $fullyQualifiedModelName The fully qualified model class name.
      * @param ?array<string,string> $convertedModelsMap The map of `fully qualified model name => interface name` definitions this class can use instead of generating its own definitions.
      * @param ?string $modelCollectorPath The path to be used for scanning for models.
+     *
+     * @throws InvalidModelException
+     * @throws UnsupportedDatabaseConnection
      */
     public function __construct(
         private string $fullyQualifiedModelName,
@@ -349,6 +361,25 @@ final class TypeScriptifyModel {
     }
 
     /**
+     * Format `$attribute` to the preferred case style.
+     *
+     * @param string $attribute
+     *
+     * @return string
+     */
+    private function formatAttributeName(string $attribute): string {
+        return match ($this->caseStyle) {
+            CaseStyle::DEFAULT => $attribute,
+            CaseStyle::CAMEL => Str::camel($attribute),
+            CaseStyle::PASCAL => Str::studly($attribute),
+            CaseStyle::SNAKE => Str::snake(Str::studly($attribute)),
+            // 'kebab' style attributes are supported in TypeScript interfaces
+            // as long as they're inside quotes.
+            CaseStyle::KEBAB => sprintf("'%s'", Str::kebab(Str::studly($attribute))),
+        };
+    }
+
+    /**
      * Set whether we should include the model's protected $hidden attributes.
      *
      * @param bool $includeHidden
@@ -370,6 +401,25 @@ final class TypeScriptifyModel {
      */
     public function includeRelations(bool $includeRelations): self {
         $this->includeRelations = $includeRelations;
+
+        return $this;
+    }
+
+    /**
+     * Prefer the `$style` case style.
+     *
+     * @param string $caseStyle
+     *
+     * @return self
+     *
+     * @throws InvalidCaseStyleException
+     */
+    public function preferCaseStyle(string $caseStyle): self {
+        if (!in_array($caseStyle, CaseStyle::all())) {
+            throw new InvalidCaseStyleException;
+        }
+
+        $this->caseStyle = $caseStyle;
 
         return $this;
     }
@@ -429,7 +479,7 @@ final class TypeScriptifyModel {
                 }
 
                 // Append the relation to the interface we're generating.
-                $outputBuffer->push(sprintf('    %s: %s;', $relationName, $generatedType));
+                $outputBuffer->push(sprintf('    %s: %s;', $this->formatAttributeName($relationName), $generatedType));
 
                 // If we've generated a new interface, we'll want to append it above the current
                 // interface we're in the process of generating.
@@ -451,7 +501,7 @@ final class TypeScriptifyModel {
                 }
             } else {
                 // Append the column name, and the TypeScript type to the interface we're generating.
-                $outputBuffer->push(sprintf('    %s: %s;', $columnSchema->Field, $this->getTypeScriptType($columnSchema)));
+                $outputBuffer->push(sprintf('    %s: %s;', $this->formatAttributeName($columnSchema->Field), $this->getTypeScriptType($columnSchema)));
             }
         });
 
