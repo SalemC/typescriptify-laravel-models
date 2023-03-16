@@ -47,7 +47,7 @@ return new class extends Migration {
             $table->boolean('castBoolean');
             $table->json('castArray');
             $table->string('castEncrypted');
-            $table->timestamp('castTimestamp');
+            $table->timestamp('castTimestamp')->useCurrent();
             $table->date('castImmutableDate');
             $table->string('castAsStringable');
             $table->dateTime('castImmutableDateTime');
