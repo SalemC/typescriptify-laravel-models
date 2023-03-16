@@ -11,8 +11,21 @@ permissions:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
+    
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: typescriptify_laravel_models
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
 
     steps:
     - uses: shivammathur/setup-php@15c43e89cdef867065b0213be354c2841860869e
@@ -34,11 +47,6 @@ jobs:
 
     - name: Install dependencies
       run: composer install --prefer-dist --no-progress
-      
-    - name: Create Database
-      run: |
-        mkdir -p database
-        touch database/database.sqlite
 
     - name: Run test suite
       run: composer run-script test
